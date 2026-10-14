@@ -1,0 +1,82 @@
+name: Build Android APK
+
+on:
+  push:
+    branches: [main, master]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Find the app (unzips milk-delivery-manager.zip if the project is uploaded as a zip)
+        run: |
+          if [ -f package.json ]; then
+            echo "APP_DIR=." >> "$GITHUB_ENV"
+          else
+            mkdir -p _src
+            unzip -q milk-delivery-manager.zip -d _src
+            PKG=$(find _src -maxdepth 3 -name package.json -not -path "*/node_modules/*" | head -1)
+            echo "APP_DIR=$(dirname "$PKG")" >> "$GITHUB_ENV"
+          fi
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - name: Install dependencies
+        working-directory: ${{ env.APP_DIR }}
+        run: npm ci
+
+      - name: Run tests
+        working-directory: ${{ env.APP_DIR }}
+        run: npm test
+
+      - name: Build web app
+        working-directory: ${{ env.APP_DIR }}
+        run: npm run build
+
+      - name: Create Android project
+        working-directory: ${{ env.APP_DIR }}
+        run: npx cap add android
+
+      - name: Generate app icons
+        continue-on-error: true
+        working-directory: ${{ env.APP_DIR }}
+        run: npx @capacitor/assets generate --android --assetPath assets
+
+      - name: Sync web files into Android
+        working-directory: ${{ env.APP_DIR }}
+        run: npx cap sync android
+
+      - name: Build debug APK
+        working-directory: ${{ env.APP_DIR }}/android
+        run: |
+          chmod +x gradlew
+          ./gradlew assembleDebug --no-daemon
+
+      - name: Name the APK
+        run: cp "${{ env.APP_DIR }}/android/app/build/outputs/apk/debug/app-debug.apk" MilkDeliveryManager.apk
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: MilkDeliveryManager-apk
+          path: MilkDeliveryManager.apk
+
+      - name: Publish APK as a release (easy download link)
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: apk-${{ github.run_number }}
+          name: Milk Delivery Manager build ${{ github.run_number }}
+          files: MilkDeliveryManager.apk
+          make_latest: true
