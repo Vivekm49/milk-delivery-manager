@@ -59,6 +59,28 @@ jobs:
         working-directory: ${{ env.APP_DIR }}
         run: npx cap sync android
 
+      - name: Use the fixed signing key and version number
+        working-directory: ${{ env.APP_DIR }}
+        run: |
+          cp signing/milk-key.p12 android/app/milk-key.p12
+          python3 - <<'PY'
+          import re
+          p = 'android/app/build.gradle'
+          s = open(p).read()
+          s = re.sub(r'versionCode\s+\d+', 'versionCode ${{ github.run_number }}', s, count=1)
+          s = s.replace('android {', """android {
+              signingConfigs {
+                  debug {
+                      storeFile file('milk-key.p12')
+                      storeType 'pkcs12'
+                      storePassword 'milkmanager'
+                      keyAlias 'milkkey'
+                      keyPassword 'milkmanager'
+                  }
+              }""", 1)
+          open(p, 'w').write(s)
+          PY
+
       - name: Build debug APK
         working-directory: ${{ env.APP_DIR }}/android
         run: |
